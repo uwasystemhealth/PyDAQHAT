@@ -1,3 +1,3 @@
-__init__.py
-pydaqhat.py
-daqhats_utils.py
+# __init__.py
+from .pydaqhat import pydaqhat
+from .daqhats_utils import daqhats_utils
