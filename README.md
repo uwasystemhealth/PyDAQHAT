@@ -16,7 +16,9 @@ cd
 
 ## Uninstalling
 
-
+```sh
+pip3 uninstall PyDAQHAT -y
+```
 
 ## Getting Started
 
