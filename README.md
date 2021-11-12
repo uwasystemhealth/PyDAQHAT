@@ -4,6 +4,22 @@ This python module allows for the control of the [MCC172 DAQ HAT](https://www.mc
 
 This module uses the [daqhats_utils.py](pydaqhat/daqhats_utils.py) which originated from the [MCC172 DAQ HAT examples folder](https://github.com/mccdaq/daqhats/blob/master/examples/python/mcc172/daqhats_utils.py).
 
+## Requirements
+
+This module requires the installation of the [DAQHATS](https://github.com/mccdaq/daqhats) module.
+
+Please see <https://github.com/mccdaq/daqhats> for details.
+
+### Update the EEPROM images
+
+If you change your board stack, you must update the saved EEPROM images so that
+the library has the correct board information. You can use the DAQ HAT Manager or the
+command:
+
+```sh
+sudo daqhats_read_eeproms
+```
+
 ## Installation 
 
 ```sh
