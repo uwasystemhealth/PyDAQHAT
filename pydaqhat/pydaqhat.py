@@ -223,7 +223,7 @@ def get_hat():
     hat = mcc172(address)
     return hat
 
-def chanlist_to_listlist(channels, maxdevices=6, numperhat=2):
+def __chanlist_to_listlist(channels, maxdevices=6, numperhat=2):
     """
     This function converts a list of channels to be used (e.g. [0,1,3])
     into a list of lists [[0,1], [1], [None], [None]]
