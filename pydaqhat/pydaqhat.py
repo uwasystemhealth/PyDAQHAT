@@ -25,10 +25,9 @@ def finite_scan(
     """ This runs a scan of predetermined length on the PiDAQ
     Args:
         channels (list): List containing channels to use
-        iepe_enable (bool): Enable IEPE if true
-        sensitivity (float): Sensitivity of sensor in mV/unit
         sample_rate (float): Number of samples per second
         recording_length (float): Length of recording in seconds 
+        verbose (bool) : Show addition info
         
     Returns:
         hat (any): Returns the MCC172 hat object
@@ -58,13 +57,14 @@ def finite_scan(
         print(f"Number of hats : {number_of_hats}")
         
     for i, hat in enumerate(hats):
-        ## TODO Allow for multi-channel configurationyy
         for j, chan in enumerate(chans[i]):
             if (chan != None):
                 # Configure IEPE.
-                hat.iepe_config_write(chan, channels[int(i*CHANNELS_PER_HAT + j)].iepe_enable)
+                hat.iepe_config_write(
+                    chan, channels[int(i*CHANNELS_PER_HAT + j)].iepe_enable)
                 # Configure sensitivity
-                hat.a_in_sensitivity_write(chan, channels[int(i*CHANNELS_PER_HAT + j)].sensitivity)
+                hat.a_in_sensitivity_write(
+                    chan, channels[int(i*CHANNELS_PER_HAT + j)].sensitivity)
         if hat.address() != MASTER:
             # Configure the slave clocks.
             hat.a_in_clock_config_write(SourceType.SLAVE, sample_rate)
@@ -99,9 +99,9 @@ def finite_scan(
             print("-----------------------------")
             for i, chan in enumerate(chans[n]):
                 if chan != None:
-                        print(f"    Channel {chan}")
-                        print(f"        Sensitivity         : {hat.a_in_sensitivity_read(chan)}")
-                        print(f"        IEPE Enable         : {bool(hat.iepe_config_read(chan))}")
+                    print(f"    Channel {chan}")
+                    print(f"        Sensitivity         : {hat.a_in_sensitivity_read(chan)}")
+                    print(f"        IEPE Enable         : {bool(hat.iepe_config_read(chan))}")
             print("-----------------------------")
             print("")
  
