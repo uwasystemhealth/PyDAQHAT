@@ -7,44 +7,56 @@ from sys import stdout, version_info
 from math import sqrt
 from daqhats import (mcc172, hat_list, OptionFlags, SourceType, HatIDs, 
                      HatError)
-from daqhats_utils import (select_hat_device, enum_mask_to_string,
+from .daqhats_utils import (select_hat_device, enum_mask_to_string,
                            chan_list_to_mask)
 from ipywidgets import widgets
-from channel import Channel
+from collections import namedtuple
+
+from .channel import Channel
 
 scan = False
 
 def finite_scan(
-    channels=[Channel(0,3000,False),
-              Channel(1,1234,True),
-              Channel(2,4321,False)],
+    channels=[Channel(0,"Channel 0",3000,False),
+              Channel(1,"Channel 1",1234,True),
+              Channel(2,"Channel 2",4321,False),
+              Channel(3,"Custom name",3000,False),
+              Channel(4,"Channel 4",3000,False),
+              Channel(5,"Channel 5",3000,False)],
     sample_rate=24000,
     recording_length=1,
     verbose=False,
 ):
     """ This runs a scan of predetermined length on the PiDAQ
     Args:
-        channels (list): List containing channels to use
+        channels (list): List of class Channel containing channels to use
         sample_rate (float): Number of samples per second
         recording_length (float): Length of recording in seconds 
-        verbose (bool) : Show addition info
+        verbose (bool): Verbose output
         
     Returns:
-        hat (any): Returns the MCC172 hat object
+        ScanResult (namedtuple): Returns a named tuple containing the following
+        information: 
+        ( 
+        inputs: array containing function inputs (channels, sample rate, recording length)
+        channels: input channels converted to a channel mask array
+        data: output data from scan. data[3] corresponds to channel 3 etc.
+        )
     """
     
-    MASTER = 0
-    MAX_DEVICE_COUNT = 4
+    MASTER = 0 # Master hat is the index 0 hat
+    MAX_DEVICE_COUNT = 3 # Maximum number of hats on device
     CHANNELS_PER_HAT = 2
+        
     timeout = 5.  # Seconds
     options = OptionFlags.DEFAULT
     channel_mask = [None] * MAX_DEVICE_COUNT
     channel_count = [0] * MAX_DEVICE_COUNT
     
     ## Parse channels into correct format
-    chans = chanlist_to_listlist(channels, 
-                                 MAX_DEVICE_COUNT, 
-                                 CHANNELS_PER_HAT)
+    chans = format_channels(channels, 
+                            MAX_DEVICE_COUNT, 
+                            CHANNELS_PER_HAT)
     if verbose:
         print(f"Channels: {chans}")
     
@@ -52,6 +64,7 @@ def finite_scan(
     hat_info = hat_list(filter_by_id=HatIDs.MCC_172)
     hats = [mcc172(x.address) for x in hat_info]
     number_of_hats = len(hats)
+    
     if verbose:
         print("Hats:\n",hat_info)
         print(f"Number of hats : {number_of_hats}")
@@ -61,10 +74,12 @@ def finite_scan(
             if (chan != None):
                 # Configure IEPE.
                 hat.iepe_config_write(
-                    chan, channels[int(i*CHANNELS_PER_HAT + j)].iepe_enable)
+                    chan, 
+                    channels[int(i*CHANNELS_PER_HAT + j)].iepe_enable)
                 # Configure sensitivity
                 hat.a_in_sensitivity_write(
-                    chan, channels[int(i*CHANNELS_PER_HAT + j)].sensitivity)
+                    chan, 
+                    channels[int(i*CHANNELS_PER_HAT + j)].sensitivity)
         if hat.address() != MASTER:
             # Configure the slave clocks.
             hat.a_in_clock_config_write(SourceType.SLAVE, sample_rate)
@@ -88,142 +103,66 @@ def finite_scan(
         sr = hat.a_in_scan_actual_rate(sample_rate)
         total_samples = int(recording_length*sr)
         if verbose:
-            print("-----------------------------")
-            print(f"Hat {n}")
-            print("-----------------------------")
-            print(f"    Channels                : {chans[n]}")
-            print(f"    Channel mask            : {channel_mask[n]}")
-            print(f"    Number of channels used : {channel_count[n]}")
-            print(f"    Actual sample rate      : {sr}")
-            print(f"    Total number of samples : {total_samples}")
-            print("-----------------------------")
+            print(f"""
+-----------------------------
+Hat {n}
+-----------------------------
+    Channels                : {chans[n]}
+    Channel mask            : {channel_mask[n]}
+    Number of channels used : {channel_count[n]}
+    Actual sample rate      : {sr}
+    Total number of samples : {total_samples}
+-----------------------------""")
             for i, chan in enumerate(chans[n]):
                 if chan != None:
-                    print(f"    Channel {chan}")
-                    print(f"        Sensitivity         : {hat.a_in_sensitivity_read(chan)}")
-                    print(f"        IEPE Enable         : {bool(hat.iepe_config_read(chan))}")
-            print("-----------------------------")
-            print("")
- 
-        
-    data = [None] * MAX_DEVICE_COUNT
+                        print(f"""
+    Channel {chan}            
+        Sensitivity         : {hat.a_in_sensitivity_read(chan)}
+        IEPE Enable         : {bool(hat.iepe_config_read(chan))}
+-----------------------------""")
+
+    if verbose:
+        print("Preparing each hat to record")
+    data = [None] * MAX_DEVICE_COUNT * CHANNELS_PER_HAT
     # Read the data from each HAT device.
     for i, hat in enumerate(hats):
         if(channel_mask[i] != None):
+            print(f"Hat {i} has started recording")
             hat.a_in_scan_start(channel_mask[i], total_samples, options)
         
     for i, hat in enumerate(hats):
         if(channel_mask[i] != None):
-            data[i] = hat.a_in_scan_read_numpy(total_samples, -1)
-        
+            #Run through chans[i] and split based on that
+            raw_data = hat.a_in_scan_read_numpy(total_samples, -1).data
+            if(len(chans[i]) == 2):
+                if verbose:
+                    print("Splitting on 2")
+                data[i*2] = raw_data[0::2]
+                data[i*2 + 1] = raw_data[1::2]
+            elif(len(chans[i]) == 1):
+                data[i*2] = raw_data
+            else:
+                 print("List of channels is formatted incorrectly")
+                    
+    print("Recording has finished")
+    
     for i, hat in enumerate(hats):
         hat.a_in_scan_cleanup()
+        
+        
+    ScanResult = namedtuple("ScanResult", "inputs channels data")
+    output = ScanResult([sample_rate, recording_length, channels], chans, data)
     
-    return data
+    return output
 
 
-## TODO convert parameters to a named tuple
-def continous_scan_start(channels=[0], iepe_enable=False, sensitivity=1000, sample_rate=20000, buffer_size=10000):
-    """ This runs a continous scan on the PiDAQ 
-    Args:
-        channels (list): List containing channels to use
-        iepe_enable (bool): Enable IEPE if true
-        sensitivity (float): Sensitivity of sensor in mV/unit
-        sample_rate (float): Number of samples per second
-        buffer_size (float): Number of samples to keep in buffer
-
-    Returns:
-        hat (any): Returns MCC172 hat object
-    """
-    global hat 
-    
-    channel_mask = chan_list_to_mask(channels) # Returns equivalent integer representing channels
-    channel_count = len(channels)
-    
-    options = OptionFlags.CONTINUOUS
-    
-    # Finds address of MCC172 and allocates it as hat
-    # TODO allow this to work for multiple boards (hat[])
-    address = select_hat_device(HatIDs.MCC_172)
-    hat = mcc172(address)
-    
-    print("Found a board at address: " + str(address))
-    
-    # Set channel specific parameters
-    ## TODO Allow for multi-chanel configuration (different sensitivities)
-    for channel in channels:
-        hat.iepe_config_write(channel, iepe_enable)
-        hat.a_in_sensitivity_write(channel, sensitivity)
-    
-    #Set clock rate
-    ## TODO This must be change to master/slave for multi-board config
-    hat.a_in_clock_config_write(SourceType.LOCAL, sample_rate)
-    
-    # Wait for clocks to sync
-    clock_sync = False
-    while clock_sync == False:
-        clock_sync = hat.a_in_clock_config_read().synchronized
-        sleep(0.01)
-        
-    ## TODO Change to requested parameters and actual parameters for all (using config_read method)
-    print("""Recording will start with parameters
-                Channels: {0}
-                IEPE: {1}
-                Requested Scan Rate: {2} Hz
-                Actual Scan Rate: {3:.3f} Hz
-                Samples Per Channel: {4}
-                Sensitivity: {5} mV/unit
-                Option Flags: {6}
-                """.format(str(channels), str(iepe_enable), sample_rate, hat.a_in_scan_actual_rate(sample_rate), buffer_size, sensitivity, (str(options).split('.'))[1]))
-    
-    # Start scan
-    hat.a_in_scan_start(channel_mask, buffer_size, options)
-    
-    print("Starting scan...")
-    
-    sleep(0.1)
-
-    return hat
-
-def continously_write_csv(hat, filename):
-    global scan
-    
-    logfile = open(filename, "w")
-    logfile.write("Value\n")
-    
-    while scan:
-        data = hat.a_in_scan_read(1,0).data
-        for i in range(0,len(data)):
-            logfile.write("{0:.6f}\n".format(data[i]))
-        
-        sleep(0.01)
-    print("Exited loop")
-    
-    return 1
-    
-def stop_scan(hat):
-    """ Stops scan for given hat """ 
-    hat.a_in_scan_stop()
-    hat.a_in_scan_cleanup()
-        
-    print("Scan has stopped")
-                
-def button_update(x):
-    global scan
-    if (scan == False):
-        scan = True
-        continous_scan_start([0],False,1000,20480,300)
-    elif (scan == True):
-        scan = False
-        
-        stop_scan()
-        
+### Static functions ### 
 def get_hat():
     address = select_hat_device(HatIDs.MCC_172)
     hat = mcc172(address)
     return hat
 
-def __chanlist_to_listlist(channels, maxdevices=6, numperhat=2):
+def format_channels(channels, maxdevices=4, numperhat=2):
     """
     This function converts a list of channels to be used (e.g. [0,1,3])
     into a list of lists [[0,1], [1], [None], [None]]
@@ -253,3 +192,12 @@ def __chanlist_to_listlist(channels, maxdevices=6, numperhat=2):
                 chans[ind].remove(None)
 
     return chans
+
+def channels_to_string():
+    """
+    Turns input list of channels into a readable string
+    
+    Args:
+        channels (list): List of Channel objects
+    Returns:
+        (string): String in the format "0,1,2,3,4,5"""
