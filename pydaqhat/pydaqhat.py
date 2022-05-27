@@ -6,11 +6,12 @@ from time import sleep
 from sys import stdout, version_info
 from math import sqrt
 from daqhats import (mcc172, hat_list, OptionFlags, SourceType, HatIDs, 
-                     HatError)
+                     TriggerModes, HatError)
 from .daqhats_utils import (select_hat_device, enum_mask_to_string,
                            chan_list_to_mask)
 from ipywidgets import widgets
 from collections import namedtuple
+import RPi.GPIO as GPIO
 
 from .channel import Channel
 
@@ -49,9 +50,16 @@ def finite_scan(
     CHANNELS_PER_HAT = 2
         
     timeout = 5.  # Seconds
-    options = OptionFlags.DEFAULT
+    options = OptionFlags.EXTTRIGGER
+    trigger_mode = TriggerModes.RISING_EDGE
     channel_mask = [None] * MAX_DEVICE_COUNT
     channel_count = [0] * MAX_DEVICE_COUNT
+    
+    ## GPIO Setup
+    pin = 40
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(pin, GPIO.OUT)
+    GPIO.output(pin, GPIO.LOW)
     
     ## Parse channels into correct format
     chans = format_channels(channels, 
@@ -83,6 +91,7 @@ def finite_scan(
         if hat.address() != MASTER:
             # Configure the slave clocks.
             hat.a_in_clock_config_write(SourceType.SLAVE, sample_rate)
+            hat.trigger_config(SourceType.SLAVE, trigger_mode)
 
     # Configure the master clock and start the sync.
     hat = hats[MASTER]
@@ -95,6 +104,8 @@ def finite_scan(
             sleep(0.005)
     if verbose:
         print("Hats are now synced")
+        
+    hat.trigger_config(SourceType.MASTER, trigger_mode)
 
     for n, hat in enumerate(hats):
         if(chans[n] != [None]):
@@ -124,12 +135,21 @@ Hat {n}
     if verbose:
         print("Preparing each hat to record")
     data = [None] * MAX_DEVICE_COUNT * CHANNELS_PER_HAT
-    # Read the data from each HAT device.
+    # Start scan in each hat. Hats will wait for the trigger until scan starts
     for i, hat in enumerate(hats):
         if(channel_mask[i] != None):
             print(f"Hat {i} has started recording")
+            #Begins a new thread and waits until trigger condition is met before scanning
             hat.a_in_scan_start(channel_mask[i], total_samples, options)
-        
+    
+    ## Activate Trigger
+    GPIO.output(pin, GPIO.HIGH)
+    ## Wait until trigger is activated before continuing 
+    print("Waiting for trigger")
+    while(not hat.a_in_scan_status().triggered):
+        sleep(0.005)
+    print("Trigger activated")
+    
     for i, hat in enumerate(hats):
         if(channel_mask[i] != None):
             #Run through chans[i] and split based on that
@@ -192,7 +212,7 @@ def format_channels(channels, maxdevices=4, numperhat=2):
                 chans[ind].remove(None)
 
     return chans
-
+    
 def channels_to_string():
     """
     Turns input list of channels into a readable string
